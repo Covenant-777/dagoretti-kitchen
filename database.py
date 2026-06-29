@@ -1,17 +1,17 @@
 """
 database.py — Dagoretti Kitchen Incubator
-SQLite schema — 6-digit PINs (1,000,000 combinations)
+PostgreSQL database — data persists forever on Render
 """
-import sqlite3, hashlib, os
+import psycopg2, psycopg2.extras, hashlib, os
 from datetime import datetime
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "dagoretti.db")
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://dagoretti_db_user:WwRfDK9joeJPF1GxUzYPPBrjvHj4rM8X@dpg-d91eqirsq97s738fr60g-a/dagoretti_db"
+)
 
 def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
     return conn
 
 def hash_pin(pin: str) -> str:
@@ -19,27 +19,37 @@ def hash_pin(pin: str) -> str:
 
 def init_db():
     conn = get_db(); c = conn.cursor()
+
     c.execute("""CREATE TABLE IF NOT EXISTS Bakers (
-        BakerID INTEGER PRIMARY KEY AUTOINCREMENT,
-        FullName TEXT NOT NULL, PIN_Hash TEXT NOT NULL,
+        BakerID    SERIAL PRIMARY KEY,
+        FullName   TEXT NOT NULL,
+        PIN_Hash   TEXT NOT NULL,
         HourlyRate REAL NOT NULL DEFAULT 50.0,
-        IsActive INTEGER NOT NULL DEFAULT 1,
-        CreatedAt TEXT NOT NULL DEFAULT (datetime('now','localtime')))""")
+        IsActive   INTEGER NOT NULL DEFAULT 1,
+        CreatedAt  TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')))""")
+
     c.execute("""CREATE TABLE IF NOT EXISTS Sessions (
-        SessionID INTEGER PRIMARY KEY AUTOINCREMENT,
-        BakerID INTEGER NOT NULL, StartTime TEXT NOT NULL,
-        EndTime TEXT, DurationMinutes REAL, AmountDue REAL, Month TEXT,
-        FOREIGN KEY (BakerID) REFERENCES Bakers(BakerID))""")
+        SessionID       SERIAL PRIMARY KEY,
+        BakerID         INTEGER NOT NULL REFERENCES Bakers(BakerID),
+        StartTime       TEXT NOT NULL,
+        EndTime         TEXT,
+        DurationMinutes REAL,
+        AmountDue       REAL,
+        Month           TEXT)""")
+
     c.execute("""CREATE TABLE IF NOT EXISTS FailedAttempts (
-        AttemptID INTEGER PRIMARY KEY AUTOINCREMENT,
-        AttemptedAt TEXT NOT NULL DEFAULT (datetime('now','localtime')),
-        Note TEXT)""")
+        AttemptID   SERIAL PRIMARY KEY,
+        AttemptedAt TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+        Note        TEXT)""")
+
     c.execute("""CREATE TABLE IF NOT EXISTS MonthlyBilling (
-        BillingID INTEGER PRIMARY KEY AUTOINCREMENT,
-        BakerID INTEGER NOT NULL, Month TEXT NOT NULL,
-        TotalMinutes REAL NOT NULL DEFAULT 0,
-        TotalHours REAL NOT NULL DEFAULT 0,
+        BillingID      SERIAL PRIMARY KEY,
+        BakerID        INTEGER NOT NULL REFERENCES Bakers(BakerID),
+        Month          TEXT NOT NULL,
+        TotalMinutes   REAL NOT NULL DEFAULT 0,
+        TotalHours     REAL NOT NULL DEFAULT 0,
         TotalAmountKES REAL NOT NULL DEFAULT 0,
+<<<<<<< HEAD
         GeneratedAt TEXT NOT NULL DEFAULT (datetime('now','localtime')),
         FOREIGN KEY (BakerID) REFERENCES Bakers(BakerID))""")
 
@@ -63,27 +73,43 @@ def init_db():
     c.execute("SELECT COUNT(*) FROM AdminSettings WHERE SettingKey='admin_pin_hash'")
     if c.fetchone()[0] == 0:
         c.execute("INSERT INTO AdminSettings (SettingKey, SettingValue) VALUES (?,?)",
+=======
+        GeneratedAt    TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')))""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS AdminSettings (
+        SettingID    SERIAL PRIMARY KEY,
+        SettingKey   TEXT NOT NULL UNIQUE,
+        SettingValue TEXT NOT NULL,
+        UpdatedAt    TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')))""")
+
+    c.execute("""CREATE TABLE IF NOT EXISTS PINChangeRequests (
+        RequestID   SERIAL PRIMARY KEY,
+        BakerID     INTEGER NOT NULL REFERENCES Bakers(BakerID),
+        NewPIN_Hash TEXT NOT NULL,
+        Status      TEXT NOT NULL DEFAULT 'pending',
+        RequestedAt TEXT NOT NULL DEFAULT (to_char(now(), 'YYYY-MM-DD HH24:MI:SS')),
+        ApprovedAt  TEXT)""")
+
+    c.execute("SELECT COUNT(*) FROM AdminSettings WHERE SettingKey='admin_pin_hash'")
+    if c.fetchone()['count'] == 0:
+        c.execute("INSERT INTO AdminSettings (SettingKey, SettingValue) VALUES (%s,%s)",
+>>>>>>> 7275d62 (Switch to PostgreSQL)
                   ('admin_pin_hash', hash_pin('0000')))
 
     c.execute("SELECT COUNT(*) FROM Bakers")
-    if c.fetchone()[0] == 0:
-        # 6-digit PINs — 1,000,000 possible combinations
+    if c.fetchone()['count'] == 0:
         for name, pin, rate in [
-            ("Amina Wanjiku",  "123456", 50.0),
-            ("Brian Otieno",   "234567", 50.0),
-            ("Carol Njeri",    "345678", 50.0),
-            ("David Kamau",    "456789", 50.0),
-            ("Esther Achieng", "567890", 50.0),
-            ("Felix Mwangi",   "678901", 50.0),
-            ("Grace Moraa",    "789012", 50.0),
-            ("Hassan Abdi",    "890123", 50.0),
-            ("Irene Chebet",   "901234", 50.0),
-            ("James Ndegwa",   "012345", 50.0),
+            ("Amina Wanjiku","123456",50.0),("Brian Otieno","234567",50.0),
+            ("Carol Njeri","345678",50.0),("David Kamau","456789",50.0),
+            ("Esther Achieng","567890",50.0),("Felix Mwangi","678901",50.0),
+            ("Grace Moraa","789012",50.0),("Hassan Abdi","890123",50.0),
+            ("Irene Chebet","901234",50.0),("James Ndegwa","012345",50.0),
         ]:
-            c.execute("INSERT INTO Bakers (FullName,PIN_Hash,HourlyRate) VALUES (?,?,?)",
-                      (name, hash_pin(pin), rate))
+            c.execute("INSERT INTO Bakers (FullName,PIN_Hash,HourlyRate) VALUES (%s,%s,%s)",
+                      (name,hash_pin(pin),rate))
+
     conn.commit(); conn.close()
-    print(f"[DB] Ready — 6-digit PINs active")
+    print("[DB] PostgreSQL ready — data persists forever!")
 
 if __name__ == "__main__":
     init_db()

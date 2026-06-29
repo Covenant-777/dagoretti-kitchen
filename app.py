@@ -12,7 +12,7 @@ def auto_seed_if_empty():
     from datetime import timedelta
     conn = get_db(); c = conn.cursor()
     c.execute("SELECT COUNT(*) FROM Sessions WHERE EndTime IS NOT NULL")
-    if c.fetchone()[0] == 0:
+    if c.fetchone()['count'] == 0:
         now = __import__('datetime').datetime.now()
         month = now.strftime("%Y-%m")
         base = now.replace(day=1, hour=7, minute=0, second=0, microsecond=0)
@@ -28,7 +28,7 @@ def auto_seed_if_empty():
                                      minute=random.choice([0,15,30]))
                 end = start + timedelta(minutes=dur)
                 amt = round((dur/60)*50.0, 2)
-                c.execute("INSERT INTO Sessions (BakerID,StartTime,EndTime,DurationMinutes,AmountDue,Month) VALUES (?,?,?,?,?,?)",
+                c.execute("INSERT INTO Sessions (BakerID,StartTime,EndTime,DurationMinutes,AmountDue,Month) VALUES (%s,%s,%s,%s,%s,%s)",
                           (baker_id, start.strftime("%Y-%m-%d %H:%M:%S"),
                            end.strftime("%Y-%m-%d %H:%M:%S"), float(dur), amt, month))
         conn.commit()
@@ -55,7 +55,7 @@ def record_fail(ip, reason):
     lockout_tracker[ip]["count"] += 1
     count = lockout_tracker[ip]["count"]
     conn = get_db()
-    conn.execute("INSERT INTO FailedAttempts (Note) VALUES (?)",
+    conn.execute("INSERT INTO FailedAttempts (Note) VALUES (%s)",
                  (f"{reason} | Attempt {count}/{MAX_ATTEMPTS} from {ip}",))
     conn.commit(); conn.close()
     if count >= MAX_ATTEMPTS:
@@ -81,7 +81,7 @@ def baker_login():
     if locked:
         return jsonify({"status":"locked","message":f"Terminal locked. Try again in {secs}s.","seconds_remaining":secs}), 423
     conn = get_db(); c = conn.cursor()
-    c.execute("SELECT * FROM Bakers WHERE PIN_Hash=? AND IsActive=1", (hash_pin(pin),))
+    c.execute("SELECT * FROM Bakers WHERE PIN_Hash=%s AND IsActive=1", (hash_pin(pin),))
     baker = c.fetchone()
     if not baker:
         conn.close(); just_locked, ls = record_fail(ip, "Wrong PIN")
@@ -91,7 +91,7 @@ def baker_login():
         return jsonify({"status":"wrong_pin","message":f"Incorrect PIN. {rem} attempt{'s' if rem!=1 else ''} remaining.","attempts_remaining":rem}), 401
     reset_fail(ip)
     bid = baker["BakerID"]; bname = baker["FullName"]
-    c.execute("SELECT * FROM Sessions WHERE BakerID=? AND EndTime IS NULL ORDER BY SessionID DESC LIMIT 1", (bid,))
+    c.execute("SELECT * FROM Sessions WHERE BakerID=%s AND EndTime IS NULL ORDER BY SessionID DESC LIMIT 1", (bid,))
     active = c.fetchone()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     if active:
@@ -99,17 +99,17 @@ def baker_login():
         dur_min = (datetime.strptime(now,"%Y-%m-%d %H:%M:%S") - start_dt).total_seconds() / 60
         amount = round((dur_min/60)*baker["HourlyRate"], 2)
         month = start_dt.strftime("%Y-%m")
-        c.execute("UPDATE Sessions SET EndTime=?,DurationMinutes=?,AmountDue=?,Month=? WHERE SessionID=?",
+        c.execute("UPDATE Sessions SET EndTime=%s,DurationMinutes=%s,AmountDue=%s,Month=%s WHERE SessionID=%s",
                   (now, round(dur_min,2), amount, month, active["SessionID"]))
-        c.execute("SELECT StartTime,EndTime,DurationMinutes,AmountDue FROM Sessions WHERE BakerID=? AND EndTime IS NOT NULL ORDER BY SessionID DESC LIMIT 5", (bid,))
+        c.execute("SELECT StartTime,EndTime,DurationMinutes,AmountDue FROM Sessions WHERE BakerID=%s AND EndTime IS NOT NULL ORDER BY SessionID DESC LIMIT 5", (bid,))
         history = [dict(r) for r in c.fetchall()]
         conn.commit(); conn.close()
         m = int(dur_min); s = int((dur_min%1)*60)
         return jsonify({"status":"logout","baker_name":bname,"baker_id":bid,"start_time":active["StartTime"],"end_time":now,"duration_minutes":round(dur_min,2),"duration_display":f"{m}m {s}s","amount_due":amount,"hourly_rate":baker["HourlyRate"],"session_history":history,"message":f"Session ended. {m}m {s}s. Bill: KES {amount}"})
     else:
-        c.execute("INSERT INTO Sessions (BakerID,StartTime) VALUES (?,?)", (bid, now))
+        c.execute("INSERT INTO Sessions (BakerID,StartTime) VALUES (%s,%s)", (bid, now))
         sid = c.lastrowid
-        c.execute("SELECT StartTime,EndTime,DurationMinutes,AmountDue FROM Sessions WHERE BakerID=? AND EndTime IS NOT NULL ORDER BY SessionID DESC LIMIT 5", (bid,))
+        c.execute("SELECT StartTime,EndTime,DurationMinutes,AmountDue FROM Sessions WHERE BakerID=%s AND EndTime IS NOT NULL ORDER BY SessionID DESC LIMIT 5", (bid,))
         history = [dict(r) for r in c.fetchall()]
         conn.commit(); conn.close()
         return jsonify({"status":"login","baker_name":bname,"baker_id":bid,"session_id":sid,"start_time":now,"hourly_rate":baker["HourlyRate"],"session_history":history,"message":f"Welcome {bname.split()[0]}! Session started at {now[11:]}"})
@@ -117,7 +117,7 @@ def baker_login():
 @app.route("/api/elapsed/<int:baker_id>")
 def get_elapsed(baker_id):
     conn = get_db(); c = conn.cursor()
-    c.execute("SELECT s.SessionID,s.StartTime,b.HourlyRate FROM Sessions s JOIN Bakers b ON s.BakerID=b.BakerID WHERE s.BakerID=? AND s.EndTime IS NULL ORDER BY s.SessionID DESC LIMIT 1", (baker_id,))
+    c.execute("SELECT s.SessionID,s.StartTime,b.HourlyRate FROM Sessions s JOIN Bakers b ON s.BakerID=b.BakerID WHERE s.BakerID=%s AND s.EndTime IS NULL ORDER BY s.SessionID DESC LIMIT 1", (baker_id,))
     row = c.fetchone(); conn.close()
     if not row: return jsonify({"active":False})
     elapsed_s = int((datetime.now()-datetime.strptime(row["StartTime"],"%Y-%m-%d %H:%M:%S")).total_seconds())
@@ -161,7 +161,11 @@ def admin_change_pin():
     if hash_pin(current) != stored_hash:
         return jsonify({"error":"Current PIN is incorrect"}), 401
     conn = get_db(); c = conn.cursor()
+<<<<<<< HEAD
     c.execute("UPDATE AdminSettings SET SettingValue=?, UpdatedAt=datetime('now','localtime') WHERE SettingKey='admin_pin_hash'",
+=======
+    c.execute("UPDATE AdminSettings SET SettingValue=%s, UpdatedAt=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE SettingKey='admin_pin_hash'",
+>>>>>>> 7275d62 (Switch to PostgreSQL)
               (hash_pin(new_pin),))
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":"Admin PIN changed successfully"})
@@ -174,7 +178,7 @@ def admin_summary():
     active = c.fetchone()[0]
     c.execute("SELECT COUNT(*) FROM Bakers WHERE IsActive=1")
     bakers = c.fetchone()[0]
-    c.execute("SELECT COUNT(*),COALESCE(SUM(AmountDue),0) FROM Sessions WHERE Month=? AND EndTime IS NOT NULL", (month,))
+    c.execute("SELECT COUNT(*),COALESCE(SUM(AmountDue),0) FROM Sessions WHERE Month=%s AND EndTime IS NOT NULL", (month,))
     row = c.fetchone()
     c.execute("SELECT COUNT(*) FROM FailedAttempts WHERE AttemptedAt >= date('now','start of month')")
     fails = c.fetchone()[0]
@@ -263,17 +267,17 @@ def add_baker():
     if not name or not pin or len(pin)!=6 or not pin.isdigit():
         return jsonify({"error":"Invalid name or PIN"}), 400
     conn = get_db(); c = conn.cursor()
-    c.execute("SELECT 1 FROM Bakers WHERE PIN_Hash=?", (hash_pin(pin),))
+    c.execute("SELECT 1 FROM Bakers WHERE PIN_Hash=%s", (hash_pin(pin),))
     if c.fetchone(): conn.close(); return jsonify({"error":"PIN already in use"}), 409
-    c.execute("INSERT INTO Bakers (FullName,PIN_Hash,HourlyRate) VALUES (?,?,?)", (name,hash_pin(pin),rate))
+    c.execute("INSERT INTO Bakers (FullName,PIN_Hash,HourlyRate) VALUES (%s,%s,%s)", (name,hash_pin(pin),rate))
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":f"{name} added successfully"})
 
 @app.route("/api/admin/bakers/<int:bid>/toggle", methods=["POST"])
 def toggle_baker(bid):
     conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE Bakers SET IsActive=1-IsActive WHERE BakerID=?", (bid,))
-    conn.commit(); c.execute("SELECT IsActive FROM Bakers WHERE BakerID=?", (bid,))
+    c.execute("UPDATE Bakers SET IsActive=1-IsActive WHERE BakerID=%s", (bid,))
+    conn.commit(); c.execute("SELECT IsActive FROM Bakers WHERE BakerID=%s", (bid,))
     row = c.fetchone(); conn.close()
     return jsonify({"status":"ok","message":f"Baker {'activated' if row['IsActive'] else 'deactivated'}"})
 
@@ -282,8 +286,8 @@ def update_rate(bid):
     rate = float(request.json.get("rate", 0))
     if rate <= 0: return jsonify({"error":"Rate must be greater than 0"}), 400
     conn = get_db(); c = conn.cursor()
-    c.execute("UPDATE Bakers SET HourlyRate=? WHERE BakerID=?", (rate, bid))
-    conn.commit(); c.execute("SELECT FullName FROM Bakers WHERE BakerID=?", (bid,))
+    c.execute("UPDATE Bakers SET HourlyRate=%s WHERE BakerID=%s", (rate, bid))
+    conn.commit(); c.execute("SELECT FullName FROM Bakers WHERE BakerID=%s", (bid,))
     row = c.fetchone(); conn.close()
     return jsonify({"status":"ok","message":f"Rate updated to KES {rate}/hr for {row['FullName']}"})
 
@@ -322,9 +326,9 @@ def force_end_session(session_id):
     duration_min = (datetime.strptime(now, "%Y-%m-%d %H:%M:%S") - start_dt).total_seconds() / 60
     amount_due   = round((duration_min / 60) * session["HourlyRate"], 2)
     month        = start_dt.strftime("%Y-%m")
-    c.execute("UPDATE Sessions SET EndTime=?, DurationMinutes=?, AmountDue=?, Month=? WHERE SessionID=?",
+    c.execute("UPDATE Sessions SET EndTime=%s, DurationMinutes=%s, AmountDue=%s, Month=%s WHERE SessionID=%s",
               (now, round(duration_min, 2), amount_due, month, session_id))
-    c.execute("INSERT INTO FailedAttempts (Note) VALUES (?)",
+    c.execute("INSERT INTO FailedAttempts (Note) VALUES (%s)",
               (f"ADMIN FORCE-LOGOUT: {session['FullName']} | Session {session_id} | Duration: {int(duration_min)}m | KES {amount_due}",))
     conn.commit(); conn.close()
     m = int(duration_min); s = int((duration_min % 1) * 60)
@@ -347,7 +351,7 @@ def auto_timeout():
         SELECT s.*, b.FullName, b.HourlyRate
         FROM Sessions s JOIN Bakers b ON s.BakerID=b.BakerID
         WHERE s.EndTime IS NULL
-        AND (julianday('now','localtime') - julianday(s.StartTime))*24 > ?
+        AND (EXTRACT(EPOCH FROM (now() - TO_TIMESTAMP(s.StartTime, 'YYYY-MM-DD HH24:MI:SS')))/3600 > %s
     """, (MAX_HOURS,))
     stuck = c.fetchall()
     if not stuck:
@@ -361,9 +365,9 @@ def auto_timeout():
         billed_min   = min(duration_min, MAX_HOURS * 60)
         amount_due   = round((billed_min / 60) * session["HourlyRate"], 2)
         month        = start_dt.strftime("%Y-%m")
-        c.execute("UPDATE Sessions SET EndTime=?, DurationMinutes=?, AmountDue=?, Month=? WHERE SessionID=?",
+        c.execute("UPDATE Sessions SET EndTime=%s, DurationMinutes=%s, AmountDue=%s, Month=%s WHERE SessionID=%s",
                   (now, round(billed_min, 2), amount_due, month, session["SessionID"]))
-        c.execute("INSERT INTO FailedAttempts (Note) VALUES (?)",
+        c.execute("INSERT INTO FailedAttempts (Note) VALUES (%s)",
                   (f"AUTO-TIMEOUT: {session['FullName']} | Session {session['SessionID']} | KES {amount_due}",))
         closed += 1
     conn.commit(); conn.close()
@@ -384,22 +388,38 @@ def request_pin_change():
     if new_pin != confirm:
         return jsonify({"error":"New PIN and confirmation do not match"}), 400
     conn = get_db(); c = conn.cursor()
+<<<<<<< HEAD
     c.execute("SELECT * FROM Bakers WHERE PIN_Hash=? AND IsActive=1", (hash_pin(old_pin),))
+=======
+    c.execute("SELECT * FROM Bakers WHERE PIN_Hash=%s AND IsActive=1", (hash_pin(old_pin),))
+>>>>>>> 7275d62 (Switch to PostgreSQL)
     baker = c.fetchone()
     if not baker:
         conn.close()
         return jsonify({"error":"Current PIN is incorrect"}), 401
     # Check no pending request exists
+<<<<<<< HEAD
     c.execute("SELECT 1 FROM PINChangeRequests WHERE BakerID=? AND Status='pending'", (baker["BakerID"],))
+=======
+    c.execute("SELECT 1 FROM PINChangeRequests WHERE BakerID=%s AND Status='pending'", (baker["BakerID"],))
+>>>>>>> 7275d62 (Switch to PostgreSQL)
     if c.fetchone():
         conn.close()
         return jsonify({"error":"You already have a pending PIN change request"}), 409
     # Check new PIN not already in use
+<<<<<<< HEAD
     c.execute("SELECT 1 FROM Bakers WHERE PIN_Hash=?", (hash_pin(new_pin),))
     if c.fetchone():
         conn.close()
         return jsonify({"error":"That PIN is already in use by another baker"}), 409
     c.execute("INSERT INTO PINChangeRequests (BakerID, NewPIN_Hash) VALUES (?,?)",
+=======
+    c.execute("SELECT 1 FROM Bakers WHERE PIN_Hash=%s", (hash_pin(new_pin),))
+    if c.fetchone():
+        conn.close()
+        return jsonify({"error":"That PIN is already in use by another baker"}), 409
+    c.execute("INSERT INTO PINChangeRequests (BakerID, NewPIN_Hash) VALUES (%s,%s)",
+>>>>>>> 7275d62 (Switch to PostgreSQL)
               (baker["BakerID"], hash_pin(new_pin)))
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":f"PIN change request submitted for {baker['FullName']}. Waiting for admin approval."})
@@ -421,16 +441,26 @@ def get_pin_requests():
 def approve_pin_request(req_id):
     """Admin approves a baker PIN change"""
     conn = get_db(); c = conn.cursor()
+<<<<<<< HEAD
     c.execute("SELECT * FROM PINChangeRequests WHERE RequestID=? AND Status='pending'", (req_id,))
+=======
+    c.execute("SELECT * FROM PINChangeRequests WHERE RequestID=%s AND Status='pending'", (req_id,))
+>>>>>>> 7275d62 (Switch to PostgreSQL)
     req = c.fetchone()
     if not req:
         conn.close()
         return jsonify({"error":"Request not found or already processed"}), 404
     # Apply new PIN hash to baker
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+<<<<<<< HEAD
     c.execute("UPDATE Bakers SET PIN_Hash=? WHERE BakerID=?", (req["NewPIN_Hash"], req["BakerID"]))
     c.execute("UPDATE PINChangeRequests SET Status='approved', ApprovedAt=? WHERE RequestID=?", (now, req_id))
     c.execute("SELECT FullName FROM Bakers WHERE BakerID=?", (req["BakerID"],))
+=======
+    c.execute("UPDATE Bakers SET PIN_Hash=%s WHERE BakerID=%s", (req["NewPIN_Hash"], req["BakerID"]))
+    c.execute("UPDATE PINChangeRequests SET Status='approved', ApprovedAt=%s WHERE RequestID=%s", (now, req_id))
+    c.execute("SELECT FullName FROM Bakers WHERE BakerID=%s", (req["BakerID"],))
+>>>>>>> 7275d62 (Switch to PostgreSQL)
     name = c.fetchone()["FullName"]
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":f"PIN change approved for {name}"})
@@ -440,7 +470,11 @@ def approve_pin_request(req_id):
 def reject_pin_request(req_id):
     """Admin rejects a baker PIN change"""
     conn = get_db(); c = conn.cursor()
+<<<<<<< HEAD
     c.execute("UPDATE PINChangeRequests SET Status='rejected' WHERE RequestID=? AND Status='pending'", (req_id,))
+=======
+    c.execute("UPDATE PINChangeRequests SET Status='rejected' WHERE RequestID=%s AND Status='pending'", (req_id,))
+>>>>>>> 7275d62 (Switch to PostgreSQL)
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":"PIN change request rejected"})
 
