@@ -161,11 +161,8 @@ def admin_change_pin():
     if hash_pin(current) != stored_hash:
         return jsonify({"error":"Current PIN is incorrect"}), 401
     conn = get_db(); c = conn.cursor()
-<<<<<<< HEAD
     c.execute("UPDATE AdminSettings SET SettingValue=?, UpdatedAt=datetime('now','localtime') WHERE SettingKey='admin_pin_hash'",
-=======
     c.execute("UPDATE AdminSettings SET SettingValue=%s, UpdatedAt=to_char(now(), 'YYYY-MM-DD HH24:MI:SS') WHERE SettingKey='admin_pin_hash'",
->>>>>>> 7275d62 (Switch to PostgreSQL)
               (hash_pin(new_pin),))
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":"Admin PIN changed successfully"})
@@ -388,38 +385,29 @@ def request_pin_change():
     if new_pin != confirm:
         return jsonify({"error":"New PIN and confirmation do not match"}), 400
     conn = get_db(); c = conn.cursor()
-<<<<<<< HEAD
     c.execute("SELECT * FROM Bakers WHERE PIN_Hash=? AND IsActive=1", (hash_pin(old_pin),))
-=======
     c.execute("SELECT * FROM Bakers WHERE PIN_Hash=%s AND IsActive=1", (hash_pin(old_pin),))
->>>>>>> 7275d62 (Switch to PostgreSQL)
     baker = c.fetchone()
     if not baker:
         conn.close()
         return jsonify({"error":"Current PIN is incorrect"}), 401
     # Check no pending request exists
-<<<<<<< HEAD
     c.execute("SELECT 1 FROM PINChangeRequests WHERE BakerID=? AND Status='pending'", (baker["BakerID"],))
-=======
     c.execute("SELECT 1 FROM PINChangeRequests WHERE BakerID=%s AND Status='pending'", (baker["BakerID"],))
->>>>>>> 7275d62 (Switch to PostgreSQL)
     if c.fetchone():
         conn.close()
         return jsonify({"error":"You already have a pending PIN change request"}), 409
     # Check new PIN not already in use
-<<<<<<< HEAD
     c.execute("SELECT 1 FROM Bakers WHERE PIN_Hash=?", (hash_pin(new_pin),))
     if c.fetchone():
         conn.close()
         return jsonify({"error":"That PIN is already in use by another baker"}), 409
     c.execute("INSERT INTO PINChangeRequests (BakerID, NewPIN_Hash) VALUES (?,?)",
-=======
     c.execute("SELECT 1 FROM Bakers WHERE PIN_Hash=%s", (hash_pin(new_pin),))
     if c.fetchone():
         conn.close()
         return jsonify({"error":"That PIN is already in use by another baker"}), 409
     c.execute("INSERT INTO PINChangeRequests (BakerID, NewPIN_Hash) VALUES (%s,%s)",
->>>>>>> 7275d62 (Switch to PostgreSQL)
               (baker["BakerID"], hash_pin(new_pin)))
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":f"PIN change request submitted for {baker['FullName']}. Waiting for admin approval."})
@@ -441,26 +429,20 @@ def get_pin_requests():
 def approve_pin_request(req_id):
     """Admin approves a baker PIN change"""
     conn = get_db(); c = conn.cursor()
-<<<<<<< HEAD
     c.execute("SELECT * FROM PINChangeRequests WHERE RequestID=? AND Status='pending'", (req_id,))
-=======
     c.execute("SELECT * FROM PINChangeRequests WHERE RequestID=%s AND Status='pending'", (req_id,))
->>>>>>> 7275d62 (Switch to PostgreSQL)
     req = c.fetchone()
     if not req:
         conn.close()
         return jsonify({"error":"Request not found or already processed"}), 404
     # Apply new PIN hash to baker
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-<<<<<<< HEAD
     c.execute("UPDATE Bakers SET PIN_Hash=? WHERE BakerID=?", (req["NewPIN_Hash"], req["BakerID"]))
     c.execute("UPDATE PINChangeRequests SET Status='approved', ApprovedAt=? WHERE RequestID=?", (now, req_id))
     c.execute("SELECT FullName FROM Bakers WHERE BakerID=?", (req["BakerID"],))
-=======
     c.execute("UPDATE Bakers SET PIN_Hash=%s WHERE BakerID=%s", (req["NewPIN_Hash"], req["BakerID"]))
     c.execute("UPDATE PINChangeRequests SET Status='approved', ApprovedAt=%s WHERE RequestID=%s", (now, req_id))
     c.execute("SELECT FullName FROM Bakers WHERE BakerID=%s", (req["BakerID"],))
->>>>>>> 7275d62 (Switch to PostgreSQL)
     name = c.fetchone()["FullName"]
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":f"PIN change approved for {name}"})
@@ -470,11 +452,8 @@ def approve_pin_request(req_id):
 def reject_pin_request(req_id):
     """Admin rejects a baker PIN change"""
     conn = get_db(); c = conn.cursor()
-<<<<<<< HEAD
     c.execute("UPDATE PINChangeRequests SET Status='rejected' WHERE RequestID=? AND Status='pending'", (req_id,))
-=======
     c.execute("UPDATE PINChangeRequests SET Status='rejected' WHERE RequestID=%s AND Status='pending'", (req_id,))
->>>>>>> 7275d62 (Switch to PostgreSQL)
     conn.commit(); conn.close()
     return jsonify({"status":"ok","message":"PIN change request rejected"})
 
